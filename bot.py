@@ -1,19 +1,21 @@
 import telebot
 import requests
-from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from telebot import types
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 import mysql.connector
 from config import telegram_bot_token as token
 from config import db_name, db_username, db_password, host, auth_plugin
 
 # connection to MySQL
-connection = mysql.connector.connect(host=host,
-                                    database=db_name,
-                                    user=db_username,
-                                    password=db_password,
-                                    auth_plugin=auth_plugin)
+def get_db_connection():
+    return mysql.connector.connect(host=host,
+                                database=db_name,
+                                user=db_username,
+                                password=db_password,
+                                auth_plugin=auth_plugin)
 
+connection = get_db_connection()
 cursor=connection.cursor()
 table = "sessions"
 
@@ -47,12 +49,7 @@ def reg(message):
         return
     
     # connection to MySQL
-    connection = mysql.connector.connect(host=host,
-                                    database=db_name,
-                                    user=db_username,
-                                    password=db_password,
-                                    auth_plugin=auth_plugin)
-
+    connection = get_db_connection()
     cursor=connection.cursor()
 
     login = message.text
@@ -77,11 +74,7 @@ def register_user(message, login):
         bot.send_message(message.chat.id, text="Password cannot be empty.")
         return
 
-    connection = mysql.connector.connect(host=host,
-                                    database=db_name,
-                                    user=db_username,
-                                    password=db_password,
-                                    auth_plugin=auth_plugin)
+    connection = get_db_connection()
     cursor = connection.cursor()
 
     # Adding session
@@ -112,11 +105,7 @@ def ask_login_password(message):
 def login_user(message, login):
     password = message.text.strip()
 
-    connection = mysql.connector.connect(host=host,
-                                    database=db_name,
-                                    user=db_username,
-                                    password=db_password,
-                                    auth_plugin=auth_plugin)
+    connection = get_db_connection()
     cursor = connection.cursor()
 
     enter = cursor.execute(f"SELECT id FROM {table} WHERE login = %s AND password = %s", (login, password,))
@@ -140,11 +129,7 @@ new_users = {}
 
 # Inline menu for users
 def build_users_inline_menu(session_id):
-    connection = mysql.connector.connect(host=host,
-                                    database=db_name,
-                                    user=db_username,
-                                    password=db_password,
-                                    auth_plugin=auth_plugin)
+    connection = get_db_connection()
     cursor = connection.cursor()
     cursor.execute("SELECT name FROM users WHERE session_id = %s", (session_id,))
     users = cursor.fetchall()
@@ -213,11 +198,7 @@ def save_user_to_db(message):
     user_data['note'] = note
     session_id = sessions.get(chat_id)
 
-    connection = mysql.connector.connect(host=host,
-                                    database=db_name,
-                                    user=db_username,
-                                    password=db_password,
-                                    auth_plugin=auth_plugin)
+    connection = get_db_connection()
     cursor = connection.cursor()
 
     cursor.execute(
@@ -234,10 +215,6 @@ def save_user_to_db(message):
     updated_menu = build_users_inline_menu(session_id)
     bot.send_message(chat_id, f"User {user_data['name']} added successfully ✅")
     bot.send_message(chat_id, "Select an action or user:", reply_markup=updated_menu)
-
-
-
-
 
 
 bot.polling()
