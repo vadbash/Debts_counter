@@ -157,7 +157,6 @@ def handle_add_user_callback(call):
     if not session_id:
         bot.send_message(call.message.chat.id, "You need to log in first.")
         return
-
     msg = bot.send_message(call.message.chat.id, "Enter username:")
     bot.register_next_step_handler(msg, ask_amount)
 
@@ -168,7 +167,6 @@ def ask_amount(message):
     if not name:
         bot.send_message(chat_id, "Username cannot be empty.")
         return
-
     new_users[chat_id] = {'name': name}
     msg = bot.send_message(chat_id, "Enter amount of expenses:")
     bot.register_next_step_handler(msg, ask_note)
@@ -180,7 +178,6 @@ def ask_note(message):
     except ValueError:
         bot.send_message(chat_id, "The amount must be a number. Try again.")
         return
-
     new_users[chat_id]['amount'] = amount
     msg = bot.send_message(chat_id, "Enter a note on what the money was spent on:")
     bot.register_next_step_handler(msg, save_user_to_db)
@@ -191,6 +188,7 @@ def save_user_to_db(message):
     note = message.text.strip()
 
     user_data = new_users.get(chat_id)
+    # print(user_data)
     if not user_data:
         bot.send_message(chat_id, "An error occurred. Please try again.")
         return
@@ -201,10 +199,7 @@ def save_user_to_db(message):
     connection = get_db_connection()
     cursor = connection.cursor()
 
-    cursor.execute(
-        "INSERT INTO users (session_id, name, amount, note) VALUES (%s, %s, %s, %s)",
-        (session_id, user_data['name'], user_data['amount'], user_data['note'])
-    )
+    cursor.execute("INSERT INTO users (session_id, name, amount, note) VALUES (%s, %s, %s, %s)", (session_id, user_data['name'], user_data['amount'], user_data['note']))
     connection.commit()
     cursor.close()
     connection.close()
