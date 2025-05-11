@@ -101,7 +101,7 @@ def ask_login_password(message):
 
 
 
-#
+# login in session
 def login_user(message, login):
     password = message.text.strip()
 
@@ -167,7 +167,27 @@ def ask_amount(message):
     if not name:
         bot.send_message(chat_id, "Username cannot be empty.")
         return
+
+    session_id = sessions.get(chat_id)
+    if not session_id:
+        bot.send_message(chat_id, "You need to log in first.")
+        return
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute("SELECT COUNT(*) FROM users WHERE session_id = %s AND name = %s", (session_id, name))
+    count = cursor.fetchone()[0]
+    cursor.close()
+    connection.close()
+
+    if count > 0:
+        msg = bot.send_message(chat_id, f"A user with the name '{name}' already exists in your session. Please choose another name.")
+        bot.register_next_step_handler(msg, ask_amount)
+        return
+
+
     new_users[chat_id] = {'name': name}
+    print(new_users)
     msg = bot.send_message(chat_id, "Enter amount of expenses:")
     bot.register_next_step_handler(msg, ask_note)
 
@@ -210,6 +230,84 @@ def save_user_to_db(message):
     updated_menu = build_users_inline_menu(session_id)
     bot.send_message(chat_id, f"User {user_data['name']} added successfully ✅")
     bot.send_message(chat_id, "Select an action or user:", reply_markup=updated_menu)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("user_"))
+def handle_user_click(call):
+    session_id = sessions.get(call.message.chat.id)
+    username = call.data.split("_", 1)[1]
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    # Get all expenses for this name in this session
+    cursor.execute("SELECT amount, note FROM users WHERE session_id = %s AND name = %s", (session_id, username))
+    rows = cursor.fetchall()
+    cursor.close()
+    connection.close()
+
+    if not rows:
+        bot.send_message(call.message.chat.id, f"{username} has no expenses yet.")
+        return
+
+    total = sum(row[0] for row in rows)
+    notes = [row[1] for row in rows]
+    note_text = ", ".join(notes)
+
+    text = f"👤 {username}\n💸 Total Spent: {total}\n📝 Notes: {note_text}"
+
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("➕ Add Expense", callback_data=f"add_expense_{username}")
+    )
+
+    bot.send_message(call.message.chat.id, text, reply_markup=markup)
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith("add_expense_"))
+def add_expense_handler(call):
+    username = call.data.split("_", 2)[2]
+    msg = bot.send_message(call.message.chat.id, f"Enter amount for {username}:")
+    bot.register_next_step_handler(msg, ask_expense_note, username)
+
+def ask_expense_note(message, username):
+    chat_id = message.chat.id
+    try:
+        amount = int(message.text.strip())
+    except ValueError:
+        bot.send_message(chat_id, "Amount must be a number.")
+        return
+
+    new_users[chat_id] = {"username": username, "amount": amount}
+    msg = bot.send_message(chat_id, "Enter note for this expense:")
+    bot.register_next_step_handler(msg, save_expense_record)
+
+def save_expense_record(message):
+    chat_id = message.chat.id
+    note = message.text.strip()
+    data = new_users.get(chat_id)
+
+    if not data:
+        bot.send_message(chat_id, "Something went wrong. Try again.")
+        return
+
+    session_id = sessions.get(chat_id)
+    username = data["username"]
+    amount = data["amount"]
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    # Insert new row in users (represents a new expense entry)
+    cursor.execute("INSERT INTO users (session_id, name, amount, note) VALUES (%s, %s, %s, %s)",
+                   (session_id, username, amount, note))
+    connection.commit()
+    cursor.close()
+    connection.close()
+
+    del new_users[chat_id]
+    bot.send_message(chat_id, f"Added {amount} with note: {note} to {username} ✅")
+    updated_menu = build_users_inline_menu(session_id)
+    bot.send_message(chat_id, "Select an action or user:", reply_markup=updated_menu)
+
 
 
 bot.polling()
