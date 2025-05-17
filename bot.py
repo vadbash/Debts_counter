@@ -147,6 +147,8 @@ def build_users_inline_menu(session_id):
         name = user[0]
         markup.add(types.InlineKeyboardButton(f"👤 {name}", callback_data=f"user_{name}"))
 
+    markup.add(types.InlineKeyboardButton("🔒 Logout", callback_data="logout"))
+
     return markup
 
 # CallBack
@@ -187,7 +189,7 @@ def ask_amount(message):
 
 
     new_users[chat_id] = {'name': name}
-    print(new_users)
+    # print(new_users)
     msg = bot.send_message(chat_id, "Enter amount of expenses:")
     bot.register_next_step_handler(msg, ask_note)
 
@@ -262,6 +264,18 @@ def handle_user_click(call):
 
     bot.send_message(call.message.chat.id, text, reply_markup=markup)
 
+@bot.callback_query_handler(func=lambda call: call.data == "logout")
+def handle_logout(call):
+    chat_id = call.message.chat.id
+
+    if chat_id in sessions:
+        del sessions[chat_id]
+
+    bot.send_message(chat_id, "You have been logged out successfully. 🔒")
+    
+    # Show start menu again
+    welcome(call.message)
+
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_expense_"))
 def add_expense_handler(call):
     username = call.data.split("_", 2)[2]
@@ -274,6 +288,8 @@ def ask_expense_note(message, username):
         amount = int(message.text.strip())
     except ValueError:
         bot.send_message(chat_id, "Amount must be a number.")
+        msg = bot.send_message(chat_id, f"Enter amount for {username}:")
+        bot.register_next_step_handler(msg, ask_expense_note, username)
         return
 
     new_users[chat_id] = {"username": username, "amount": amount}
@@ -296,18 +312,30 @@ def save_expense_record(message):
     connection = get_db_connection()
     cursor = connection.cursor()
 
-    # Insert new row in users (represents a new expense entry)
-    cursor.execute("INSERT INTO users (session_id, name, amount, note) VALUES (%s, %s, %s, %s)",
-                   (session_id, username, amount, note))
+    # User record
+    cursor.execute("SELECT amount, note FROM users WHERE session_id = %s AND name = %s", (session_id, username))
+    row = cursor.fetchone()
+
+    if row:
+        # Update existing user's total amount and append note
+        old_amount, old_note = row
+        new_amount = old_amount + amount
+        new_note = (old_note or '') + ", " + note
+
+        cursor.execute("UPDATE users SET amount = %s, note = %s WHERE session_id = %s AND name = %s",
+                       (new_amount, new_note, session_id, username))
+    else:
+        cursor.execute("INSERT INTO users (session_id, name, amount, note) VALUES (%s, %s, %s, %s)",
+                       (session_id, username, amount, note))
+
     connection.commit()
     cursor.close()
     connection.close()
 
     del new_users[chat_id]
-    bot.send_message(chat_id, f"Added {amount} with note: {note} to {username} ✅")
+    bot.send_message(chat_id, f"Added {amount} to {username} ✅")
     updated_menu = build_users_inline_menu(session_id)
     bot.send_message(chat_id, "Select an action or user:", reply_markup=updated_menu)
 
-
-
+# start bot
 bot.polling()
