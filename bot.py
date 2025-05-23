@@ -5,15 +5,10 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import re
 import mysql.connector
 from config import telegram_bot_token as token
-from config import db_name, db_username, db_password, host, auth_plugin
+from db_worker import get_db_connection
 
 # connection to MySQL
-def get_db_connection():
-    return mysql.connector.connect(host=host,
-                                database=db_name,
-                                user=db_username,
-                                password=db_password,
-                                auth_plugin=auth_plugin)
+
 
 connection = get_db_connection()
 cursor=connection.cursor()
