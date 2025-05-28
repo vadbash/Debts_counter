@@ -7,9 +7,6 @@ import mysql.connector
 from config import telegram_bot_token as token
 from db_worker import get_db_connection
 
-# connection to MySQL
-
-
 connection = get_db_connection()
 cursor=connection.cursor()
 table = "sessions"
@@ -99,25 +96,47 @@ def ask_login_password(message):
 # login in session
 def login_user(message, login):
     password = message.text.strip()
+    chat_id = message.chat.id
 
     connection = get_db_connection()
     cursor = connection.cursor()
 
-    enter = cursor.execute(f"SELECT id FROM {table} WHERE login = %s AND password = %s", (login, password,))
+    # Validate login
+    cursor.execute(f"SELECT id FROM {table} WHERE login = %s AND password = %s", (login, password,))
     row = cursor.fetchone()
 
     if row:
         session_id = row[0]
-        sessions[message.chat.id] = session_id 
-        markup = types.ReplyKeyboardRemove()
-        bot.send_message(message.chat.id, "Login successful! 🎉", reply_markup=markup)
-        users_menu = build_users_inline_menu(session_id)
-        bot.send_message(message.chat.id, "Choose an action:", reply_markup=users_menu)
-    else:
-        bot.send_message(message.chat.id, "Incorrect login or password ❌")
+        sessions[chat_id] = session_id
 
-    cursor.close()
-    connection.close()
+        # Remove keyboard
+        markup = types.ReplyKeyboardRemove()
+        bot.send_message(chat_id, "Login successful! 🎉", reply_markup=markup)
+
+        # Check if user already exists for this chat_id
+        cursor.execute("SELECT COUNT(*) FROM users WHERE session_id = %s AND chat_id = %s", (session_id, chat_id))
+        exists = cursor.fetchone()[0]
+
+        if exists == 0:
+            # Determine name: Telegram username or fallback to login
+            tg_name = message.from_user.username or login
+            cursor.execute("INSERT INTO users (session_id, name, amount, note, chat_id) VALUES (%s, %s, %s, %s, %s)",
+                           (session_id, tg_name, 0, '', chat_id))
+            connection.commit()
+            bot.send_message(chat_id, f"User '{tg_name}' created automatically for your session ✅")
+
+        cursor.close()
+        connection.close()
+
+        # Show menu
+        users_menu = build_users_inline_menu(session_id)
+        bot.send_message(chat_id, "Choose an action:", reply_markup=users_menu)
+
+    else:
+        bot.send_message(chat_id, "Incorrect login or password ❌")
+        cursor.close()
+        connection.close()
+
 
 # empty storage for new users
 new_users = {}
@@ -134,8 +153,6 @@ def build_users_inline_menu(session_id):
     markup = types.InlineKeyboardMarkup()
     
     # Adding new user
-    add_btn = types.InlineKeyboardButton("➕ Add user", callback_data="add_user")
-    markup.add(add_btn)
 
     # All of users
     for user in users:
@@ -146,58 +163,66 @@ def build_users_inline_menu(session_id):
 
     return markup
 
-# CallBack
-@bot.callback_query_handler(func=lambda call: call.data == "add_user")
-def handle_add_user_callback(call):
-    session_id = sessions.get(call.message.chat.id)
+# # CallBack
+# @bot.callback_query_handler(func=lambda call: call.data == "add_user")
+# def handle_add_user_callback(call):
+#     session_id = sessions.get(call.message.chat.id)
 
-    if not session_id:
-        bot.send_message(call.message.chat.id, "You need to log in first.")
-        return
-    msg = bot.send_message(call.message.chat.id, "Enter username:")
-    bot.register_next_step_handler(msg, ask_amount)
+#     if not session_id:
+#         bot.send_message(call.message.chat.id, "You need to log in first.")
+#         return
+#     msg = bot.send_message(call.message.chat.id, "Enter username:")
+#     bot.register_next_step_handler(msg, ask_amount)
 
-def ask_amount(message):
-    chat_id = message.chat.id
-    name = message.text.strip()
+# def ask_amount(message):
+#     chat_id = message.chat.id
+#     name = message.text.strip()
 
-    if not name:
-        bot.send_message(chat_id, "Username cannot be empty.")
-        return
+#     if not name:
+#         bot.send_message(chat_id, "Username cannot be empty.")
+#         return 
 
-    session_id = sessions.get(chat_id)
-    if not session_id:
-        bot.send_message(chat_id, "You need to log in first.")
-        return
+#     session_id = sessions.get(chat_id)
+#     if not session_id:
+#         bot.send_message(chat_id, "You need to log in first.")
+#         return
 
-    connection = get_db_connection()
-    cursor = connection.cursor()
-    cursor.execute("SELECT COUNT(*) FROM users WHERE session_id = %s AND name = %s", (session_id, name))
-    count = cursor.fetchone()[0]
-    cursor.close()
-    connection.close()
+#     connection = get_db_connection()  
+#     cursor = connection.cursor()   
 
-    if count > 0:
-        msg = bot.send_message(chat_id, f"A user with the name '{name}' already exists in your session. Please choose another name.")
-        bot.register_next_step_handler(msg, ask_amount)
-        return
+#     cursor.execute("SELECT COUNT(*) FROM users WHERE session_id = %s AND chat_id = %s", (session_id, chat_id))
+#     exists = cursor.fetchone()[0]
+
+#     if exists:
+#         bot.send_message(chat_id, "❌You already created a user in this session. You can't create more.")
+#         return
+
+#     cursor.execute("SELECT COUNT(*) FROM users WHERE session_id = %s AND name = %s", (session_id, name))
+#     count = cursor.fetchone()[0]
+
+#     if count > 0:
+#         msg = bot.send_message(chat_id, f"A user with the name '{name}' already exists. Please choose another.")
+#         bot.register_next_step_handler(msg, ask_amount)
+#         return
+
+#     new_users[chat_id] = {'name': name}
+#     msg = bot.send_message(chat_id, "Enter amount of expenses:")
+#     bot.register_next_step_handler(msg, ask_note)
+
+#     cursor.close()
+#     connection.close()
 
 
-    new_users[chat_id] = {'name': name}
-    # print(new_users)
-    msg = bot.send_message(chat_id, "Enter amount of expenses:")
-    bot.register_next_step_handler(msg, ask_note)
-
-def ask_note(message):
-    chat_id = message.chat.id
-    try:
-        amount = int(message.text.strip())
-    except ValueError:
-        bot.send_message(chat_id, "The amount must be a number. Try again.")
-        return
-    new_users[chat_id]['amount'] = amount
-    msg = bot.send_message(chat_id, "Enter a note on what the money was spent on:")
-    bot.register_next_step_handler(msg, save_user_to_db)
+# def ask_note(message):
+#     chat_id = message.chat.id
+#     try:
+#         amount = int(message.text.strip())
+#     except ValueError:
+#         bot.send_message(chat_id, "The amount must be a number. Try again.")
+#         return
+#     new_users[chat_id]['amount'] = amount
+#     msg = bot.send_message(chat_id, "Enter a note on what the money was spent on:")
+#     bot.register_next_step_handler(msg, save_user_to_db)
 
 # Saving into db
 def save_user_to_db(message):
@@ -216,7 +241,8 @@ def save_user_to_db(message):
     connection = get_db_connection()
     cursor = connection.cursor()
 
-    cursor.execute("INSERT INTO users (session_id, name, amount, note) VALUES (%s, %s, %s, %s)", (session_id, user_data['name'], user_data['amount'], user_data['note']))
+    cursor.execute("INSERT INTO users (session_id, name, amount, note, chat_id) VALUES (%s, %s, %s, %s, %s)", (session_id, user_data['name'], user_data['amount'], user_data['note'], chat_id))
+
     connection.commit()
     cursor.close()
     connection.close()
@@ -274,8 +300,24 @@ def handle_logout(call):
 @bot.callback_query_handler(func=lambda call: call.data.startswith("add_expense_"))
 def add_expense_handler(call):
     username = call.data.split("_", 2)[2]
-    msg = bot.send_message(call.message.chat.id, f"Enter amount for {username}:")
+    chat_id = call.message.chat.id
+    session_id = sessions.get(chat_id)
+
+    # Verify that the selected user belongs to this chat ID
+    connection = get_db_connection()
+    cursor = connection.cursor()
+    cursor.execute("SELECT 1 FROM users WHERE session_id = %s AND name = %s AND chat_id = %s", (session_id, username, chat_id))
+    is_authorized = cursor.fetchone()
+    cursor.close()
+    connection.close()
+
+    if not is_authorized:
+        bot.send_message(chat_id, "❌ You can only add expenses to your user.")
+        return
+
+    msg = bot.send_message(chat_id, f"Enter amount for {username}:")
     bot.register_next_step_handler(msg, ask_expense_note, username)
+
 
 def ask_expense_note(message, username):
     chat_id = message.chat.id
