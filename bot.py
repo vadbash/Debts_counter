@@ -159,6 +159,7 @@ def build_users_inline_menu(session_id):
         name = user[0]
         markup.add(types.InlineKeyboardButton(f"👤 {name}", callback_data=f"user_{name}"))
 
+    markup.add(types.InlineKeyboardButton("📊 Count", callback_data="count"))
     markup.add(types.InlineKeyboardButton("🔒 Logout", callback_data="logout"))
 
     return markup
@@ -373,6 +374,65 @@ def save_expense_record(message):
     bot.send_message(chat_id, f"Added {amount} to {username} ✅")
     updated_menu = build_users_inline_menu(session_id)
     bot.send_message(chat_id, "Select an action or user:", reply_markup=updated_menu)
+
+
+@bot.callback_query_handler(func=lambda call: call.data == "count")
+def handle_count(call):
+    chat_id = call.message.chat.id
+    session_id = sessions.get(chat_id)
+
+    if not session_id:
+        bot.send_message(chat_id, "🔒 You need to log in first.")
+        return
+
+    connection = get_db_connection()
+    cursor = connection.cursor()
+
+    cursor.execute("SELECT name, amount FROM users WHERE session_id = %s", (session_id,))
+    rows = cursor.fetchall()
+    cursor.close()
+    connection.close()
+
+    if not rows or len(rows) < 2:
+        bot.send_message(chat_id, "👥 Need at least two users to calculate settlements.")
+        return
+
+    # Calculate total and equal share
+    total_spent = sum(amount for _, amount in rows)
+    num_people = len(rows)
+    equal_share = total_spent / num_people
+
+    # Calculate balance per person
+    balances = {name: round(amount - equal_share, 2) for name, amount in rows}
+
+    # Create lists of creditors and debtors
+    creditors = [(name, bal) for name, bal in balances.items() if bal > 0]
+    debtors = [(name, -bal) for name, bal in balances.items() if bal < 0]
+
+    # Match debtors with creditors
+    settlements = []
+    i, j = 0, 0
+    while i < len(debtors) and j < len(creditors):
+        debtor_name, debtor_owes = debtors[i]
+        creditor_name, creditor_gets = creditors[j]
+
+        amount = min(debtor_owes, creditor_gets)
+        settlements.append(f"💸 {debtor_name} owes {creditor_name}: {amount:.2f} zł")
+
+        # Update amounts
+        debtors[i] = (debtor_name, round(debtor_owes - amount, 2))
+        creditors[j] = (creditor_name, round(creditor_gets - amount, 2))
+
+        if debtors[i][1] == 0:
+            i += 1
+        if creditors[j][1] == 0:
+            j += 1
+
+    if not settlements:
+        bot.send_message(chat_id, "✅ Everyone has paid equally. No one owes anything! 🎉")
+    else:
+        text = "📊 *Settlement Summary:*\n\n" + "\n".join(settlements)
+        bot.send_message(chat_id, text, parse_mode="Markdown")
 
 # start bot
 bot.polling()
