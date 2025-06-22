@@ -24,7 +24,7 @@ def welcome(message):
     btn1 = types.InlineKeyboardButton("Registration ®️")
     btn2 = types.InlineKeyboardButton("Login 🔐")
     markup.add(btn1, btn2)
-    bot.reply_to(message, "Welcome, if you have an account chose Login 🔐, if not - Registration ®️", reply_markup=markup)  
+    bot.reply_to(message, "Welcome, if you have some session chose Login 🔐, if not - Registration ®️", reply_markup=markup)  
 
 # registration
 @bot.message_handler(regexp='Registration ®️')
@@ -37,7 +37,8 @@ def reg(message):
     login = message.text.strip()
 
     if login == '':
-        bot.send_message(message.chat.id, text="Username cannot be empty.")
+        msg = bot.send_message(message.chat.id, text="Username cannot be empty.")
+        bot.register_next_step_handler(msg, reg)
         return
     
     # connection to MySQL
@@ -47,15 +48,19 @@ def reg(message):
     login = message.text
     
     enter = cursor.execute(f"SELECT login FROM {table} WHERE login = %s", (login,))
+    result = cursor.fetchone()
+    cursor.fetchall()
 
-    if cursor.fetchone():
-        bot.send_message(message.chat.id, text="This username is already taken.")
+    if result:
+        msg = bot.send_message(message.chat.id, text="Such session name is already taken. Try another one.")
+        bot.register_next_step_handler(msg, reg)
         cursor.close()
         connection.close()
         return
+
     
     # Handle password
-    msg = bot.send_message(message.chat.id, text="Enter a password for this username: ")
+    msg = bot.send_message(message.chat.id, text="Enter a password for this session: ")
     bot.register_next_step_handler(msg, register_user, login)
     
 def register_user(message, login):
@@ -80,15 +85,15 @@ def register_user(message, login):
 @bot.message_handler(regexp='Login 🔐')
 # Handle login
 def ask_login_username(message):
-    msg = bot.send_message(message.chat.id, "Enter your username:")
+    msg = bot.send_message(message.chat.id, "Enter your session name:")
     bot.register_next_step_handler(msg, ask_login_password)
 
 def ask_login_password(message):
     login = message.text.strip()
     if login == '':
-        bot.send_message(message.chat.id, "Username cannot be empty.")
+        bot.send_message(message.chat.id, "Session name cannot be empty.")
         return
-    msg = bot.send_message(message.chat.id, "Enter your password:")
+    msg = bot.send_message(message.chat.id, "Enter password for your session:")
     bot.register_next_step_handler(msg, login_user, login)
 
 
